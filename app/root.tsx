@@ -1,4 +1,4 @@
-import { json, LinksFunction, LoaderArgs, MetaFunction } from "@remix-run/node";
+import { json, LinksFunction, LoaderArgs, MetaFunction, Response } from "@remix-run/node";
 import {
   Links,
   LiveReload,
@@ -7,12 +7,13 @@ import {
   Scripts,
   ScrollRestoration,
   useLoaderData,
+  useRevalidator,
 } from "@remix-run/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import styles from "./styles/global.css";
-import { supabase } from '~/utils/supabase.server';
-import { createClient } from '@supabase/supabase-js';
+import { CreateSupabaseClient } from '~/utils/supabase.server';
+import { createBrowserClient } from "@supabase/auth-helpers-remix";
 import { Database } from "./types/database";
 export const meta: MetaFunction = () => ({
   charset: "utf-8",
@@ -26,19 +27,36 @@ export const links: LinksFunction =()=>[
 ];
 
 //export loader supabase
-export const loader = async ({}:LoaderArgs) => {
+export const loader = async ({request}:LoaderArgs) => {
   const env = {
     SUPABASE_URL: process.env.SUPABASE_URL!,
     SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY!,
   }
 
-  return json({env});
+const response= new Response();
+
+const supabase = CreateSupabaseClient({request,response});
+const {data:{ session }}=await supabase.auth.getSession();
+  return json({env,session}, {headers:response.headers});
 }
 
 
 export default function App() {
-const {env} = useLoaderData<typeof loader>();
-const [supabase] =  useState(() => createClient<Database>(env.SUPABASE_URL, env.SUPABASE_ANON_KEY))
+const {env, session:ServerSession} = useLoaderData<typeof loader>();
+
+const revalidator=useRevalidator();
+
+const [supabase] =  useState(() => createBrowserClient<Database>(env.SUPABASE_URL, env.SUPABASE_ANON_KEY))
+
+useEffect(() => {
+  const {data:{subscription}} = supabase.auth.onAuthStateChange(async (event, session) => {
+    if(session?.access_token !== ServerSession?.access_token) {
+      //window.location.reload();
+      revalidator.revalidate();
+    };
+  });
+  return () => subscription?.unsubscribe();
+},[]);
 
   return (
     <html lang="es">
